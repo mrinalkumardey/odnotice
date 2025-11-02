@@ -137,6 +137,9 @@
         <label>BU Address:</label>
         <textarea id="buAddress" placeholder="Enter full BU address (line breaks allowed)"></textarea>
 
+        <label>Phone No:</label>
+        <input type="text" id="phoneNo" placeholder="e.g., +91-XXXXXXXXXX">
+
         <label>Customer Name:</label>
         <input type="text" id="customerName" placeholder="Gabbar Singh">
 
@@ -156,6 +159,9 @@
 
         <label>Overdue As On Date:</label>
         <input type="date" id="overdueAsOn" readonly>
+
+        <label>Notice Date:</label>
+        <input type="date" id="noticeDate">
 
         <label>Authorised Signatory:</label>
         <input type="text" id="signatory" placeholder="Enter signatory name">
@@ -227,6 +233,14 @@
             return `${day}${suffix} ${month}, ${year}`;
         }
 
+        function formatNoticeDate(dateStr) {
+            const date = new Date(dateStr);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
         function updateWords() {
             const amount = document.getElementById('overdueAmount').value || '';
             document.getElementById('overdueWords').value = amount ? numberToWords(amount) + ' Only' : '';
@@ -266,6 +280,7 @@
                 const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
                 const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
                 const fontSize = 11;
+                const headerFontSize = 9;  // Smaller size for address, phone, date
                 const lineHeight = fontSize * 1.3;
                 const leftMargin = 72;
                 const maxWidth = 595 - leftMargin * 2;
@@ -274,27 +289,59 @@
                 const data = {
                     buName: document.getElementById('buName').value.trim() || 'Omuk BU',
                     buAddress: document.getElementById('buAddress').value.trim() || 'Address Line 1\nAddress Line 2\nPIN',
+                    phoneNo: document.getElementById('phoneNo').value.trim() || '',
                     customerName: document.getElementById('customerName').value.trim() || 'Gabbar Singh',
                     customerAddress: document.getElementById('customerAddress').value.trim() || 'Address Line 1\nAddress Line 2\nPIN',
                     loanAcNo: document.getElementById('loanAcNo').value.trim() || '1234567890',
                     overdueAmount: document.getElementById('overdueAmount').value.trim() || '0',
                     overdueWords: document.getElementById('overdueWords').value,
                     overdueAsOn: formatDate(document.getElementById('overdueAsOn').value),
+                    noticeDate: formatNoticeDate(document.getElementById('noticeDate').value || new Date().toISOString().split('T')[0]),
                     signatory: document.getElementById('signatory').value.trim() || 'Authorised signatory'
                 };
 
+                // 🆕 FIXED: Permanent logo in top-right corner (nudged up by 10pt)
+                try {
+                    const logoBytes = await fetch('logo.png').then(r => r.arrayBuffer());
+                    const logoImage = await pdfDoc.embedPng(logoBytes);
+                    const origWidth = logoImage.width;
+                    const origHeight = logoImage.height;
+                    const maxLogoWidth = 70;
+                    const scale = maxLogoWidth / origWidth;
+                    const scaledWidth = maxLogoWidth;
+                    const scaledHeight = origHeight * scale;
+                    const logoX = 595 - 72 - scaledWidth;
+                    const logoY = (842 - 72 - scaledHeight) + 10;  // Nudged up by 10pt (higher y = towards top)
+                    page.drawImage(logoImage, {
+                        x: logoX,
+                        y: logoY,
+                        width: scaledWidth,
+                        height: scaledHeight
+                    });
+                    console.log('Logo loaded successfully! Scaled to', scaledWidth, 'x', scaledHeight, 'pt at y=', logoY);
+                } catch (logoError) {
+                    console.error('Logo fail:', logoError);
+                }
+
                 // Header
-                page.drawText('Bandhan Bank', { x: leftMargin, y: currentY, size: fontSize + 2, font: boldFont });
+                page.drawText('Bandhan Bank', { x: leftMargin, y: currentY, size: fontSize + 4, font: boldFont });  // Increased by 2 more (now +4 total)
                 currentY -= lineHeight;
                 page.drawText(data.buName, { x: leftMargin, y: currentY, size: fontSize, font: boldFont });
                 currentY -= lineHeight;
 
                 const buAddrLines = data.buAddress.split('\n');
                 for (let line of buAddrLines) {
-                    page.drawText(line.trim(), { x: leftMargin, y: currentY, size: fontSize, font });
-                    currentY -= lineHeight;
+                    page.drawText(line.trim(), { x: leftMargin, y: currentY, size: headerFontSize, font });
+                    currentY -= lineHeight * 0.8;  // Slightly tighter line height for smaller font
                 }
-                currentY -= lineHeight * 2;
+                if (data.phoneNo) {
+                    page.drawText('Phone No: ' + data.phoneNo, { x: leftMargin, y: currentY, size: headerFontSize, font });
+                    currentY -= lineHeight * 0.8;
+                }
+                page.drawText('Dated: ' + data.noticeDate, { x: leftMargin, y: currentY, size: headerFontSize, font });
+                currentY -= lineHeight * 0.8;
+
+                currentY -= lineHeight * 0.5;  // Reduced gap before separator for tighter spacing
 
                 // Separator Line
                 page.drawLine({ start: { x: leftMargin, y: currentY }, end: { x: 595 - leftMargin, y: currentY }, thickness: 1, color: rgb(0, 0, 0) });
@@ -324,6 +371,11 @@
                 page.drawText(data.signatory, { x: leftMargin, y: currentY, size: fontSize, font });
                 currentY -= lineHeight;
                 page.drawText(data.buName, { x: leftMargin, y: currentY, size: fontSize, font: boldFont });
+
+                // 🆕 FIXED: End of Document marker (centered at bottom)
+                const endText = '***End of Document***';
+                const endWidth = boldFont.widthOfTextAtSize(endText, 12);
+                page.drawText(endText, { x: (595 - endWidth) / 2, y: 72, size: 12, font: boldFont });
 
                 return await pdfDoc.save();
             } finally {
@@ -366,6 +418,7 @@
         function resetForm() {
             document.getElementById('letterForm').reset();
             document.getElementById('overdueAsOn').value = new Date().toISOString().split('T')[0];
+            document.getElementById('noticeDate').value = new Date().toISOString().split('T')[0];
             updateWords();
         }
 
